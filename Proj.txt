@@ -1,0 +1,168 @@
+import pandas as pd
+import numpy as np
+
+# define preprocessing function
+def preprocess(signal):
+    # normalize signal between 0 and 1
+    signal = (signal - np.min(signal)) / (np.max(signal) - np.min(signal))
+    
+    # interpolate missing values
+    signal = pd.Series(signal)
+    signal.interpolate(limit_direction='both', inplace=True)
+    signal = signal.values
+    
+    return signal
+
+# preprocess signals for each patient
+preprocessed_signals = []
+for i in range(len(df)):
+    patientname = df.iloc[i]['patient']
+    signal = df.iloc[i]['signal']
+    preprocessed_signal = preprocess(signal)
+    preprocessed_signals.append([patientname, preprocessed_signal])
+
+# create preprocessed dataframe
+df = pd.DataFrame(preprocessed_signals, columns=['patient', 'preprocessed_signals'])
+
+#CNN-LSTM
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Conv1D, Flatten, MaxPooling1D
+
+# Create training data with 10 input timesteps and 100 output timesteps
+def create_train_data(data, n_input=10, n_output=100):
+    X, y = [], []
+    for i in range(len(data)):
+        end_ix = i + n_input
+        out_end_ix = end_ix + n_output
+        if out_end_ix > len(data[i][1]):
+            break
+        seq_x, seq_y = data[i][1][i:end_ix], data[i][1][end_ix:out_end_ix]
+        X.append(seq_x)
+        y.append(seq_y)
+    return np.array(X), np.array(y)
+
+# Convert the dataframe to a list of tuples
+data = [(row['patient'], row['preprocessed_signals']) for _, row in df.iterrows()]
+
+# Create training data with 10 input timesteps and 100 output timesteps
+train_X, train_y = create_train_data(data)
+
+# Split the data into training and validation sets (70:30 ratio)
+train_X, val_X, train_y, val_y = train_test_split(train_X, train_y, test_size=0.3)
+
+# Create LSTM-CNN model
+def create_model(n_input, n_output):
+    model = Sequential()
+    model.add(Conv1D(filters=32, kernel_size=3, activation='relu', input_shape=(n_input, 1)))
+    model.add(MaxPooling1D(pool_size=2))
+    model.add(Conv1D(filters=64, kernel_size=3, activation='relu'))
+    model.add(MaxPooling1D(pool_size=2))
+    model.add(LSTM(100, activation='relu', input_shape=(n_input, 1)))
+    model.add(Dense(n_output))
+    model.compile(optimizer='adam', loss='mse')
+    return model
+
+# Train the LSTM-CNN model
+def train_model(train_X, train_y, n_input, n_output, n_epochs=50):
+    model = create_model(n_input, n_output)
+    train_X = train_X.reshape((train_X.shape[0], train_X.shape[1], 1, 1))
+    model.fit(train_X, train_y, epochs=n_epochs, verbose=0)
+    return model
+
+# Make predictions using the trained model
+def make_predictions(model, test_X, n_input, n_output):
+    test_X = test_X.reshape((test_X.shape[0], n_input, 1, 1))
+    yhat = model.predict(test_X, verbose=0)
+    return yhat
+
+# Calculate the Mean Squared Error (MSE) of the predictions
+def calculate_mse(y_true, y_pred):
+    mse = tf.keras.losses.mean_squared_error(y_true, y_pred)
+    return mse.numpy()
+#Calculate the RMSE of the prediction
+def calculate_rmse(y_true, y_pred):
+    mse = tf.keras.losses.mean_squared_error(y_true, y_pred)
+    rmse = tf.sqrt(mse)
+    return rmse.numpy()
+
+
+# Load your dataframe
+# df = pd.read_csv('your_dataframe.csv')
+
+# Train the LSTM-CNN model on the training data
+model = train_model(train_X, train_y, n_input=10, n_output=100)
+
+# Use the trained model to make predictions on the training data
+train_pred = make_predictions(model, train_X, n_input=10, n_output=100)
+
+# Use the trained model to make predictions on the validation data
+val_pred = make_predictions(model, val_X, n_input=10, n_output=100)
+
+#Calculate MSE of test set
+mse=calculate_mse(train_y,train_pred)
+print('Training MSE:',mse)
+
+# Calculate the Mean Squared Error (MSE) of the predictions
+val_mse = calculate_mse(val_y, val_pred)
+print('Validation MSE:', val_mse)
+
+#Calculate RMSE of prediction
+val_rmse = calculate_rmse(val_y, val_pred)
+print('RMSE:',val_rmse)
+
+#prediction
+# Convert the test dataframe to a list of tuples
+test_data = [(row['patient'], row['preprocessed_signals']) for _, row in df.iterrows()]
+
+# Create test data with 10 input timesteps
+test_X, _ = create_train_data(test_data, n_input=10, n_output=0)
+
+# Use the trained model to make predictions on the train data
+test_pred = make_predictions(model, test_X, n_input=10, n_output=100 )*32
+
+# Print the predicted output for testing
+print("\nPredicted o/p :")
+print(test_pred)
+#Print the max value
+print("\nMax value of ICP :")
+print(test_pred.max())
+
+#Use the trained model to make predictions on the test data
+val_pred = make_predictions(model, val_X, n_input=10, n_output=100)*32
+
+# Print the predicted output for testing
+print("\nPredicted o/p :")
+print(val_pred)
+#Print the max value
+print("\nMax value of ICP :")
+print(val_pred.max())
+
+
+# Define a threshold for elevated ICP
+icp_threshold = 20
+
+print("Training set :")
+
+# Iterate over the test data and check for elevated ICP values
+for i in range(len(test_data)):
+    patient = test_data[i][0]
+    icp_values = test_pred[i]
+    elevated_icp = [icp_values[j] for j in range(len(icp_values)) if icp_values[j] > icp_threshold]
+    if len(elevated_icp) > 0:
+        print("Patient {} has elevated ICP".format(patient))
+        
+
+print("Validatation set : ")
+        
+# Iterate over the test data and check for elevated ICP values
+for i in range(len(test_data)):
+    patient = test_data[i][0]
+    icp_values = val_pred[i]
+    elevated_icp = [icp_values[j] for j in range(len(icp_values)) if icp_values[j] > icp_threshold]
+    if len(elevated_icp) > 0:
+        #print("Patient {} has elevated ICP values: {}".format(patient, elevated_icp))
+        print("Patient {} has elevated ICP".format(patient))
